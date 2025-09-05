@@ -1,0 +1,645 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Diaper Dash</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            background-color: #fce7f3; /* Light pink background */
+            font-family: 'Fredoka', sans-serif;
+            overflow: hidden;
+            touch-action: none; /* Disable default touch actions */
+        }
+        .container {
+            position: relative;
+            max-width: 900px;
+            margin: 2rem auto;
+            border-radius: 20px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+            background-color: white;
+            padding: 1rem;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        canvas {
+            background-color: #ffe4e6; /* Soft pink floor */
+            border-radius: 12px;
+            touch-action: none;
+            cursor: pointer;
+        }
+        .ui-panel {
+            font-size: 1.25rem;
+            font-weight: bold;
+            color: #ec4899; /* Pink color */
+            display: flex;
+            justify-content: space-between;
+            width: 100%;
+            margin-top: 1rem;
+        }
+        .start-screen, .end-screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background-color: rgba(255, 255, 255, 0.9);
+            border-radius: 12px;
+            z-index: 10;
+        }
+        .start-screen h1, .end-screen h1 {
+            font-size: 3rem;
+            color: #db2777;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.1);
+            animation: bounce 0.8s infinite;
+        }
+        .start-screen p, .end-screen p {
+            font-size: 1.25rem;
+            color: #ec4899;
+            text-align: center;
+            margin-top: 1rem;
+        }
+        .start-screen .text-sm {
+            margin-top: 1rem;
+            color: #9ca3af;
+        }
+        .start-button, .restart-button {
+            margin-top: 2rem;
+            padding: 1rem 2rem;
+            background-color: #f472b6;
+            color: white;
+            font-size: 1.5rem;
+            font-weight: bold;
+            border-radius: 9999px;
+            box-shadow: 0 4px 14px rgba(244, 114, 182, 0.4);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .start-button:hover, .restart-button:hover {
+            transform: scale(1.05);
+            box-shadow: 0 6px 20px rgba(244, 114, 182, 0.6);
+        }
+        @keyframes bounce {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-10px); }
+        }
+        .collectible-pulse {
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+        }
+        .player-bounce {
+            animation: player-bounce 1s infinite;
+        }
+        @keyframes player-bounce {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-5px); }
+        }
+    </style>
+</head>
+<body class="p-4">
+
+    <div class="container">
+        <!-- Game Canvas -->
+        <canvas id="gameCanvas"></canvas>
+
+        <!-- UI Panel -->
+        <div class="ui-panel">
+            <div id="score">Score: 0</div>
+            <div id="timer">Time: 60</div>
+        </div>
+
+        <!-- Start Screen -->
+        <div id="startScreen" class="start-screen">
+            <h1 class="font-bold">Diaper Dash!</h1>
+            <p>Help the baby explore the house and collect all the toys before the parents get home!</p>
+            <p class="text-sm mt-4">Use the arrow keys or swipe on your phone to move.</p>
+            <button id="startButton" class="start-button">Start Adventure</button>
+        </div>
+
+        <!-- End Screen -->
+        <div id="endScreen" class="end-screen hidden">
+            <h1 id="endMessage"></h1>
+            <p id="finalScore"></p>
+            <button id="restartButton" class="restart-button">Play Again</button>
+        </div>
+    </div>
+
+    <script>
+        window.onload = function() {
+            // --- Game Variables ---
+            const canvas = document.getElementById('gameCanvas');
+            const ctx = canvas.getContext('2d');
+            let gameState = 'START_SCREEN';
+
+            const player = { x: 0, y: 0, size: 40, speed: 5 };
+            let collectibles = [];
+            let drinkObjects = [];
+            let diaperObjects = [];
+            let furnitureObjects = [];
+            let score = 0;
+            let timer = 60;
+            let timerInterval;
+            let keys = {};
+            let touchStartX, touchStartY;
+            let hasPlayerMoved = false;
+            let isCrying = false;
+            let cryDuration = 500; // Crying duration in milliseconds
+            let lastCryTime = 0;
+            let isDrinking = false;
+            let drinkDuration = 1000;
+            let lastDrinkTime = 0;
+            let isBathing = false;
+            let bathDuration = 1500;
+            let lastBathTime = 0;
+            let pooObjects = [];
+            let lastPooTime;
+            let isMomVisible = false; // New: Mom's visibility state
+
+            // --- UI Elements ---
+            const startScreen = document.getElementById('startScreen');
+            const startButton = document.getElementById('startButton');
+            const endScreen = document.getElementById('endScreen');
+            const endMessage = document.getElementById('endMessage');
+            const finalScore = document.getElementById('finalScore');
+            const scoreDisplay = document.getElementById('score');
+            const timerDisplay = document.getElementById('timer');
+            const restartButton = document.getElementById('restartButton');
+
+            // --- Event Listeners ---
+            window.addEventListener('resize', resizeCanvas);
+            startButton.addEventListener('click', startGame);
+            restartButton.addEventListener('click', startGame);
+
+            // Keyboard input
+            window.addEventListener('keydown', (e) => {
+                keys[e.key] = true;
+                if (gameState === 'PLAYING') hasPlayerMoved = true;
+            });
+            window.addEventListener('keyup', (e) => {
+                keys[e.key] = false;
+            });
+
+            // Touch input
+            canvas.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                touchStartX = e.touches[0].clientX;
+                touchStartY = e.touches[0].clientY;
+            });
+            canvas.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                const touchEndX = e.changedTouches[0].clientX;
+                const touchEndY = e.changedTouches[0].clientY;
+                const dx = touchEndX - touchStartX;
+                const dy = touchEndY - touchStartY;
+
+                // Simple swipe detection
+                if (Math.abs(dx) > Math.abs(dy)) {
+                    if (dx > 20) keys['ArrowRight'] = true;
+                    if (dx < -20) keys['ArrowLeft'] = true;
+                } else {
+                    if (dy > 20) keys['ArrowDown'] = true;
+                    if (dy < -20) keys['ArrowUp'] = true;
+                }
+                
+                // Clear keys after a brief moment to simulate a single tap/swipe
+                setTimeout(() => {
+                    keys['ArrowRight'] = false;
+                    keys['ArrowLeft'] = false;
+                    keys['ArrowDown'] = false;
+                    keys['ArrowUp'] = false;
+                }, 100);
+
+                if (gameState === 'PLAYING') hasPlayerMoved = true;
+            });
+
+            // --- Game Functions ---
+            function resizeCanvas() {
+                canvas.width = Math.min(window.innerWidth - 64, 800);
+                canvas.height = Math.min(window.innerHeight - 200, 500);
+                player.x = canvas.width / 2;
+                player.y = canvas.height / 2;
+            }
+
+            function startGame() {
+                gameState = 'PLAYING';
+                score = 0;
+                timer = 60;
+                hasPlayerMoved = false;
+                isCrying = false;
+                isDrinking = false;
+                isBathing = false;
+                isMomVisible = false; // Reset mom's visibility
+                pooObjects = [];
+                lastPooTime = Date.now();
+                resizeCanvas();
+                startScreen.classList.add('hidden');
+                endScreen.classList.add('hidden');
+                
+                generateCollectibles(5);
+                generateDrinks(3);
+                generateDiapers(2);
+                generateFurniture();
+                updateUI();
+                
+                // Start the timer
+                if (timerInterval) clearInterval(timerInterval);
+                timerInterval = setInterval(() => {
+                    if (gameState === 'PLAYING') {
+                        timer--;
+                        updateUI();
+                        if (timer <= 0) {
+                            endGame(false); // Time's up
+                        }
+                    }
+                }, 1000);
+
+                // Start the game loop
+                gameLoop();
+            }
+
+            function endGame(win) {
+                gameState = 'GAME_OVER';
+                clearInterval(timerInterval);
+                if (win) {
+                    endMessage.textContent = 'You Win!';
+                    finalScore.textContent = `You collected all the toys! Final Score: ${score}`;
+                } else {
+                    endMessage.textContent = 'Time\'s Up!';
+                    finalScore.textContent = `The parents are home! Final Score: ${score}`;
+                }
+                endScreen.classList.remove('hidden');
+            }
+
+            function generateCollectibles(count) {
+                collectibles = [];
+                for (let i = 0; i < count; i++) {
+                    collectibles.push({
+                        x: Math.random() * (canvas.width - 40) + 20,
+                        y: Math.random() * (canvas.height - 40) + 20,
+                        size: 20
+                    });
+                }
+            }
+
+            function generateDrinks(count) {
+                drinkObjects = [];
+                for (let i = 0; i < count; i++) {
+                    // Randomly choose between milk bottle and water bottle
+                    const type = Math.random() < 0.5 ? 'milk' : 'water';
+                    drinkObjects.push({
+                        type: type,
+                        x: Math.random() * (canvas.width - 40) + 20,
+                        y: Math.random() * (canvas.height - 40) + 20,
+                        size: 25
+                    });
+                }
+            }
+
+            function generateDiapers(count) {
+                diaperObjects = [];
+                for (let i = 0; i < count; i++) {
+                    diaperObjects.push({
+                        x: Math.random() * (canvas.width - 40) + 20,
+                        y: Math.random() * (canvas.height - 40) + 20,
+                        size: 25
+                    });
+                }
+            }
+
+            function generateFurniture() {
+                furnitureObjects = [
+                    // Sofa
+                    { type: 'sofa', x: 50, y: 50, width: 150, height: 75 },
+                    // TV
+                    { type: 'tv', x: canvas.width / 2 - 40, y: 40, width: 80, height: 60 },
+                    // Fridge
+                    { type: 'fridge', x: canvas.width - 120, y: canvas.height - 120, width: 60, height: 100 },
+                    // Bathtub
+                    { type: 'bathtub', x: canvas.width - 200, y: 50, width: 150, height: 75 },
+                    // New: Door
+                    { type: 'door', x: 50, y: canvas.height - 150, width: 80, height: 100 }
+                ];
+            }
+
+            // Function to check for collision between two rectangles
+            function checkCollision(rect1, rect2) {
+                return rect1.x < rect2.x + rect2.width &&
+                       rect1.x + rect1.width > rect2.x &&
+                       rect1.y < rect2.y + rect2.height &&
+                       rect1.y + rect1.height > rect2.y;
+            }
+
+            function update() {
+                if (gameState !== 'PLAYING') return;
+                
+                let oldX = player.x;
+                let oldY = player.y;
+
+                // Move player based on keyboard/touch input
+                if (keys['ArrowLeft'] && player.x > player.size / 2) {
+                    player.x -= player.speed;
+                }
+                if (keys['ArrowRight'] && player.x < canvas.width - player.size / 2) {
+                    player.x += player.speed;
+                }
+                if (keys['ArrowUp'] && player.y > player.size / 2) {
+                    player.y -= player.speed;
+                }
+                if (keys['ArrowDown'] && player.y < canvas.height - player.size / 2) {
+                    player.y += player.speed;
+                }
+
+                // Check for collisions with furniture
+                const playerRect = { x: player.x - player.size / 2, y: player.y - player.size / 2, width: player.size, height: player.size };
+                for (let i = 0; i < furnitureObjects.length; i++) {
+                    const f = furnitureObjects[i];
+                    const furnitureRect = { x: f.x, y: f.y, width: f.width, height: f.height };
+                    if (checkCollision(playerRect, furnitureRect)) {
+                        // Revert position if a collision occurs
+                        player.x = oldX;
+                        player.y = oldY;
+                        
+                        // Check if it's the bathtub and trigger a bath
+                        if (f.type === 'bathtub') {
+                             isBathing = true;
+                             lastBathTime = Date.now();
+                             score += 15; // Score bonus for a bath
+                             isCrying = false; // Bath makes the baby happy
+                             pooObjects = []; // Bath cleans up all poo
+                             updateUI();
+                        }
+                        break;
+                    }
+                }
+                
+                // Reset states after their duration
+                if (isCrying && Date.now() - lastCryTime > cryDuration) {
+                    isCrying = false;
+                }
+                if (isDrinking && Date.now() - lastDrinkTime > drinkDuration) {
+                    isDrinking = false;
+                }
+                if (isBathing && Date.now() - lastBathTime > bathDuration) {
+                    isBathing = false;
+                }
+
+                // New: Check if the mom should appear
+                if (timer <= 10 && !isMomVisible) {
+                    isMomVisible = true;
+                }
+
+                // Check for collisions with collectibles
+                for (let i = collectibles.length - 1; i >= 0; i--) {
+                    const c = collectibles[i];
+                    const dx = player.x - c.x;
+                    const dy = player.y - c.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+
+                    if (distance < player.size / 2 + c.size / 2) {
+                        score += 10;
+                        collectibles.splice(i, 1);
+                        updateUI();
+                    }
+                }
+                
+                // Check for collisions with drink objects
+                for (let i = drinkObjects.length - 1; i >= 0; i--) {
+                    const d = drinkObjects[i];
+                    const dx = player.x - d.x;
+                    const dy = player.y - d.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+
+                    if (distance < player.size / 2 + d.size / 2) {
+                        score += 5; // Extra points for drinks
+                        timer += 5; // Time bonus for drinks
+                        drinkObjects.splice(i, 1);
+                        isDrinking = true;
+                        lastDrinkTime = Date.now();
+                        updateUI();
+                    }
+                }
+
+                // Check for collisions with diaper objects
+                for (let i = diaperObjects.length - 1; i >= 0; i--) {
+                    const d = diaperObjects[i];
+                    const dx = player.x - d.x;
+                    const dy = player.y - d.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+
+                    if (distance < player.size / 2 + d.size / 2) {
+                        score += 20; // High bonus for a clean diaper
+                        diaperObjects.splice(i, 1);
+                        pooObjects = []; // Clean up all poo on the screen
+                        lastPooTime = Date.now(); // Reset the poo timer
+                        updateUI();
+                    }
+                }
+
+                // Check if it's time to create a new poo object
+                if (Date.now() - lastPooTime > 5000) {
+                    const maxDistance = 150; // Max distance from the baby
+                    const angle = Math.random() * 2 * Math.PI; // Random angle in radians
+                    const distance = Math.random() * maxDistance; // Random distance
+
+                    let newX = player.x + distance * Math.cos(angle);
+                    let newY = player.y + distance * Math.sin(angle);
+
+                    // Clamp the new position to be within the canvas boundaries
+                    newX = Math.max(25, Math.min(canvas.width - 25, newX));
+                    newY = Math.max(25, Math.min(canvas.height - 25, newY));
+
+                    pooObjects.push({
+                        x: newX,
+                        y: newY,
+                        size: 25
+                    });
+                    lastPooTime = Date.now();
+                }
+
+                // Check for collision with poo objects
+                for (let i = pooObjects.length - 1; i >= 0; i--) {
+                    const p = pooObjects[i];
+                    const dx = player.x - p.x;
+                    const dy = player.y - p.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+                    if (distance < player.size / 2 + p.size / 2) {
+                        isCrying = true;
+                        lastCryTime = Date.now();
+                        score = Math.max(0, score - 5);
+                        pooObjects.splice(i, 1); // Remove the poo object
+                        updateUI();
+                        break;
+                    }
+                }
+
+                // Win condition: check if all toys are collected AND the score is greater than 0
+                // This prevents the game from ending immediately on launch.
+                if (collectibles.length === 0 && score > 0) {
+                    endGame(true); // All collectibles found
+                }
+            }
+
+            // Function to draw the baby character with a face and diaper
+            function drawBaby(x, y, size) {
+                ctx.save();
+                ctx.translate(x, y);
+
+                // Draw Head (emoji)
+                ctx.font = `${size}px Fredoka`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                let babyEmoji;
+                if (isCrying) {
+                    babyEmoji = '😭';
+                } else if (isDrinking) {
+                    babyEmoji = '😋';
+                } else if (isBathing) {
+                    babyEmoji = '🧼';
+                } else {
+                    babyEmoji = '👶';
+                }
+                ctx.fillText(babyEmoji, 0, -size / 2 - 5);
+
+                // Draw Diaper
+                const diaperWidth = size * 0.7;
+                const diaperTopY = -size / 2 + 5;
+                const diaperBottomY = diaperTopY + size * 0.5;
+                const legGap = size * 0.3;
+
+                ctx.beginPath();
+                ctx.moveTo(-diaperWidth / 2, diaperTopY); // top left
+                ctx.lineTo(diaperWidth / 2, diaperTopY); // top right
+                ctx.lineTo(diaperWidth / 2, diaperBottomY); // side right
+                ctx.lineTo(legGap / 2, diaperBottomY); // crotch right
+                ctx.lineTo(-legGap / 2, diaperBottomY); // crotch left
+                ctx.lineTo(-diaperWidth / 2, diaperBottomY); // side left
+                ctx.closePath();
+                ctx.fillStyle = '#add8e6'; /* light blue for diaper */
+                ctx.fill();
+                ctx.stroke();
+
+                ctx.restore();
+            }
+
+            function draw() {
+                // Clear the canvas
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                // Draw background/floor
+                ctx.fillStyle = '#ffe4e6';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                // Draw furniture first, so other objects are on top
+                furnitureObjects.forEach(f => {
+                    ctx.font = '80px Fredoka';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    let emoji;
+                    switch (f.type) {
+                        case 'sofa':
+                            emoji = '🛋️';
+                            ctx.fillText(emoji, f.x + f.width / 2, f.y + f.height / 2);
+                            break;
+                        case 'tv':
+                            emoji = '📺';
+                            ctx.fillText(emoji, f.x + f.width / 2, f.y + f.height / 2);
+                            break;
+                        case 'fridge':
+                            emoji = '🧊';
+                            ctx.fillText(emoji, f.x + f.width / 2, f.y + f.height / 2);
+                            break;
+                        case 'bathtub':
+                            emoji = '🛁';
+                            ctx.fillText(emoji, f.x + f.width / 2, f.y + f.height / 2);
+                            break;
+                        case 'door':
+                            // Draw mom first, then the door on top of her
+                            if (isMomVisible) {
+                                ctx.font = '60px Fredoka';
+                                ctx.fillText('👩', f.x + f.width / 2, f.y + f.height / 2);
+                            }
+                            ctx.font = '80px Fredoka';
+                            ctx.fillText('🚪', f.x + f.width / 2, f.y + f.height / 2);
+                            break;
+                    }
+                });
+
+                // Draw collectibles
+                collectibles.forEach(c => {
+                    // Draw a simple toy emoji
+                    ctx.font = `${c.size}px Fredoka`;
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.save();
+                    ctx.translate(c.x, c.y);
+                    ctx.scale(1 + Math.sin(Date.now() / 300) * 0.1, 1 + Math.sin(Date.now() / 300) * 0.1); // Simple pulse effect
+                    ctx.fillText('🧸', 0, 0); // Teddy Bear emoji
+                    ctx.restore();
+                });
+
+                // Draw drink objects
+                drinkObjects.forEach(d => {
+                    ctx.font = `${d.size}px Fredoka`;
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    let emoji = d.type === 'milk' ? '🍼' : '💧';
+                    ctx.fillText(emoji, d.x, d.y);
+                });
+
+                // Draw diaper objects
+                diaperObjects.forEach(d => {
+                    ctx.font = `${d.size}px Fredoka`;
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText('🚼', d.x, d.y);
+                });
+
+                // Draw poo objects from the array
+                pooObjects.forEach(p => {
+                    ctx.font = `${p.size}px Fredoka`;
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText('💩', p.x, p.y);
+                });
+
+                // Draw player (the baby)
+                ctx.save();
+                if (hasPlayerMoved) {
+                    ctx.translate(player.x, player.y);
+                    ctx.scale(1, 1 + Math.sin(Date.now() / 200) * 0.05); // Simple bobbing animation
+                    drawBaby(0, 0, player.size);
+                } else {
+                    drawBaby(player.x, player.y, player.size);
+                }
+                ctx.restore();
+            }
+
+            function updateUI() {
+                scoreDisplay.textContent = `Score: ${score}`;
+                timerDisplay.textContent = `Time: ${Math.max(0, timer)}`;
+            }
+
+            function gameLoop() {
+                update();
+                draw();
+                if (gameState === 'PLAYING' || isCrying || isDrinking || isBathing || isMomVisible) {
+                    requestAnimationFrame(gameLoop);
+                }
+            }
+
+            // Initial setup
+            resizeCanvas();
+            gameLoop();
+        };
+    </script>
+</body>
+</html>
